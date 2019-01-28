@@ -10,12 +10,14 @@ SCK (Serial Clock)  ->  A5 on Uno/Pro-Mini, 21 on Mega2560/Due, 3 Leonardo/Pro-M
 
  */
 
-#include <BME280I2C.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <Wire.h>
+#include <BME280I2C.h>
+#include <PubSubClient.h>
+#include <sstream>
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <Wire.h>
 
 #define SERIAL_BAUD 115200
 
@@ -52,14 +54,17 @@ const char* ssid = "artran";
 const char* wifiPassword = "Life is like a candle";
 
 const char* mqttServer = "m24.cloudmqtt.com";
-const int mqttPort = 28919;
+const int mqttPort = 18919;
 const char* mqttUser = "aqgqghbc";
 const char* mqttPassword = "zvFEUZexwzp5";
 
 BME280I2C bme;    // Default : forced mode, standby time = 1000 ms
                   // Oversampling = pressure ×1, temperature ×1, humidity ×1, filter off,
 
-void printBME280Data(Stream* client);
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+void printBME280Data(Stream* serial_stream);
 
 void setup() {
     Serial.begin(SERIAL_BAUD);
@@ -103,6 +108,23 @@ void setup() {
     // Show initial display buffer contents on the screen --
     // the library initializes this with an Adafruit splash screen.
     display.display();
+
+    client.setServer(mqttServer, mqttPort);
+
+    while (!client.connected()) {
+        Serial.println("Connecting to MQTT...");
+
+        if (client.connect("ESP32Client", mqttUser, mqttPassword )) {
+
+            Serial.println("connected");
+
+        } else {
+            Serial.print("failed with state ");
+            Serial.print(client.state());
+            delay(2000);
+
+        }
+    }
 }
 
 void loop() {
@@ -111,23 +133,28 @@ void loop() {
     delay(500);
 }
 
-void printBME280Data(Stream* client) {
+void printBME280Data(Stream* serial_stream) {
     float temp(NAN), hum(NAN), pres(NAN);
+    std::ostringstream oss;
 
     BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
     BME280::PresUnit presUnit(BME280::PresUnit_Pa);
 
     bme.read(pres, temp, hum, tempUnit, presUnit);
 
-    client->print("Temp: ");
-    client->print(temp);
-    client->print("°"+ String(tempUnit == BME280::TempUnit_Celsius ? 'C' :'F'));
-    client->print("\t\tHumidity: ");
-    client->print(hum);
-    client->print("% RH");
-    client->print("\t\tPressure: ");
-    client->print(pres);
-    client->println(" Pa");
+    serial_stream->print("Temp: ");
+    serial_stream->print(temp);
+    serial_stream->print("°"+ String(tempUnit == BME280::TempUnit_Celsius ? 'C' :'F'));
+    serial_stream->print("\t\tHumidity: ");
+    serial_stream->print(hum);
+    serial_stream->print("% RH");
+    serial_stream->print("\t\tPressure: ");
+    serial_stream->print(pres);
+    serial_stream->println(" Pa");
 
-    delay(6000);
+    oss << "{\"temp\": " << temp << ", \"humidity\": " << hum << ", \"pressure\": " << pres << "}";
+
+    client.publish("paincavemonitor", oss.str().c_str());
+
+    delay(60 * 1000);
 }
