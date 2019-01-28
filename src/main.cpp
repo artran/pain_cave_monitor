@@ -156,6 +156,7 @@ void publish_sensor_data(sensor_data data) {
     if (client.connected()) {
         oss << "{\"temperature\": " << data.temperature << ", \"humidity\": " << data.humidity << ", \"pressure\": " << data.pressure << "}";
         client.publish("paincavemonitor", oss.str().c_str());
+        client.disconnect();
     }
 }
 
