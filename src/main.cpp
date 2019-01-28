@@ -11,10 +11,15 @@
 
 #define SERIAL_BAUD 115200
 
-#define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define OLED_RESET    -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
+struct sensor_data {
+    float humidity;
+    float pressure;
+    float temperature;
+};
 
 const char* ssid = "artran";
 const char* wifiPassword = "Life is like a candle";
@@ -24,25 +29,58 @@ const int mqttPort = 18919;
 const char* mqttUser = "aqgqghbc";
 const char* mqttPassword = "zvFEUZexwzp5";
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-BME280I2C bme;    // Default : forced mode, standby time = 1000 ms
+BME280I2C bme;    // Default : forced mode, standby time = 1000 ms /* NOLINT */
                   // Oversampling = pressure ×1, temperature ×1, humidity ×1, filter off,
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET); /* NOLINT */
+WiFiClient espClient; /* NOLINT */
+PubSubClient client(espClient); /* NOLINT */
 
-WiFiClient espClient;
-PubSubClient client(espClient);
+void initialise_display();
 
-void printBME280Data(Stream* serial_stream);
+void initialise_wifi();
+
+void initialise_bme280();
+
+void initialise_mqtt();
+
+void print_sensor_data(sensor_data data);
+
+sensor_data fetch_bme280_data();
+
+void publish_sensor_data(sensor_data data);
 
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
-#pragma clang diagnostic ignored "-Wmissing-noreturn"
 void setup() {
     Serial.begin(SERIAL_BAUD);
+    while(!Serial) {} // Wait
+
+    initialise_display();
+
+    initialise_bme280();
+
+    initialise_wifi();
+
+    initialise_mqtt();
+}
+#pragma clang diagnostic pop
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-noreturn"
+void initialise_display() {
+    if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+        Serial.println(F("SSD1306 allocation failed"));
+        for(;;); // Don't proceed, loop forever
+    }
+
+    display.display();
+}
+#pragma clang diagnostic pop
+
+void initialise_wifi() {
     WiFi.disconnect(true);
     WiFi.begin(ssid, wifiPassword);
     Wire.begin();
-
-    while(!Serial) {} // Wait
 
     while (!WiFi.isConnected()) {
         delay(1000);
@@ -52,7 +90,9 @@ void setup() {
     Serial.print("Connected to the WiFi network with IP: ");
     Serial.println(WiFi.localIP());
     WiFi.enableIpV6();
+}
 
+void initialise_bme280() {
     while(!bme.begin()) {
         Serial.println("Could not find BME280 sensor!");
         delay(1000);
@@ -68,40 +108,43 @@ void setup() {
         default:
             Serial.println("Found UNKNOWN sensor! Error!");
     }
+}
 
-    if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
-        Serial.println(F("SSD1306 allocation failed"));
-        for(;;); // Don't proceed, loop forever
-    }
-
-    display.display();
-
+void initialise_mqtt() {
     client.setServer(mqttServer, mqttPort);
+}
+
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
+void loop() {
+    sensor_data bme_data = fetch_bme280_data();
+    print_sensor_data(bme_data);
+    publish_sensor_data(bme_data);
+    delay(60 * 1000);
 }
 #pragma clang diagnostic pop
 
-void loop() {
-//    Serial.println(WiFi.localIPv6());
-    printBME280Data(&Serial);
-    delay(60 * 1000);
+
+sensor_data fetch_bme280_data() {
+    sensor_data data = sensor_data();
+    bme.read(data.pressure, data.temperature, data.humidity);
+    return data;
 }
 
-void printBME280Data(Stream* serial_stream) {
-    float temperature(NAN), humidity(NAN), pressure(NAN);
+void print_sensor_data(sensor_data data) {
+    Serial.print("Temp: ");
+    Serial.print(data.temperature);
+    Serial.print("°C");
+    Serial.print("\t\tHumidity: ");
+    Serial.print(data.humidity);
+    Serial.print("% RH");
+    Serial.print("\t\tPressure: ");
+    Serial.print(data.pressure);
+    Serial.println(" Pa");
+}
+
+void publish_sensor_data(sensor_data data) {
     std::ostringstream oss;
-
-    bme.read(pressure, temperature, humidity);
-
-    serial_stream->print("Temp: ");
-    serial_stream->print(temperature);
-    serial_stream->print("°C");
-    serial_stream->print("\t\tHumidity: ");
-    serial_stream->print(humidity);
-    serial_stream->print("% RH");
-    serial_stream->print("\t\tPressure: ");
-    serial_stream->print(pressure);
-    serial_stream->println(" Pa");
-
     if (!client.connected()) {
         if (!client.connect("PainCaveMonitorClient", mqttUser, mqttPassword)) {
             Serial.print("Connection to MQTT broker failed with state: ");
@@ -111,7 +154,8 @@ void printBME280Data(Stream* serial_stream) {
     }
 
     if (client.connected()) {
-        oss << "{\"temperature\": " << temperature << ", \"humidity\": " << humidity << ", \"pressure\": " << pressure << "}";
+        oss << "{\"temperature\": " << data.temperature << ", \"humidity\": " << data.humidity << ", \"pressure\": " << data.pressure << "}";
         client.publish("paincavemonitor", oss.str().c_str());
     }
 }
+
