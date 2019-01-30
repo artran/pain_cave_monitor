@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.2)
-project(ArduinoPainCaveMonitor)
+project(pain_cave_monitor)
 
 include(CMakeListsPrivate.txt)
 
