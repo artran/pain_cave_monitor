@@ -15,6 +15,10 @@
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
+uint8_t BEEP = 2;  // GPIO used for beeper
+uint8_t ALERT_LED = 0;  // GPIO used for red LED
+uint8_t ACTIVITY_LED = 4;  // GPIO used for blue LED
+
 struct sensor_data {
     float humidity;
     float pressure;
@@ -49,11 +53,17 @@ sensor_data fetch_bme280_data();
 
 void publish_sensor_data(sensor_data data);
 
+void initialise_gpio();
+
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 void setup() {
     Serial.begin(SERIAL_BAUD);
     while(!Serial) {} // Wait
+
+    initialise_gpio();
+
+    digitalWrite(ALERT_LED, HIGH);
 
     initialise_display();
 
@@ -62,7 +72,20 @@ void setup() {
     initialise_wifi();
 
     initialise_mqtt();
+
+    digitalWrite(ALERT_LED, LOW);
 }
+
+void initialise_gpio() {
+    pinMode(BEEP, OUTPUT);
+    pinMode(ALERT_LED, OUTPUT);
+    pinMode(ACTIVITY_LED, OUTPUT);
+
+    digitalWrite(BEEP, LOW);
+    digitalWrite(ALERT_LED, LOW);
+    digitalWrite(ACTIVITY_LED, LOW);
+}
+
 #pragma clang diagnostic pop
 
 #pragma clang diagnostic push
@@ -78,6 +101,8 @@ void initialise_display() {
 #pragma clang diagnostic pop
 
 void initialise_wifi() {
+    digitalWrite(ACTIVITY_LED, HIGH);
+
     WiFi.disconnect(true);
     WiFi.begin(ssid, wifiPassword);
     Wire.begin();
@@ -90,6 +115,8 @@ void initialise_wifi() {
     Serial.print("Connected to the WiFi network with IP: ");
     Serial.println(WiFi.localIP());
     WiFi.enableIpV6();
+
+    digitalWrite(ACTIVITY_LED, LOW);
 }
 
 void initialise_bme280() {
@@ -117,10 +144,14 @@ void initialise_mqtt() {
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 void loop() {
+    digitalWrite(ACTIVITY_LED, HIGH);
     sensor_data bme_data = fetch_bme280_data();
     print_sensor_data(bme_data);
     publish_sensor_data(bme_data);
-    delay(60 * 1000);
+    delay(500);
+    digitalWrite(ACTIVITY_LED, LOW);
+
+    delay(59 * 1000);
 }
 #pragma clang diagnostic pop
 
