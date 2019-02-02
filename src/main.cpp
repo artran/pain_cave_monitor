@@ -219,8 +219,9 @@ double measure_battery_current() {
  * @return the battery voltage
  */
 double measure_battery_voltage() {
+    // Voltage divider is 3k3 to ground, 10k to battery
     int battery_in = analogRead(BATTERY_VOLTAGE);
-    return 0.75e-3 * battery_in;
+    return (0.75e-3 * battery_in) * 13300 / 3300;
 }
 
 void print_sensor_data(sensor_data data) {
