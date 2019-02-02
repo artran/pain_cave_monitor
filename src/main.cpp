@@ -234,19 +234,27 @@ void display_sensor_data(sensor_data data) {
     display.setTextSize(1);
     display.setTextColor(WHITE);
 
-    display.drawFastHLine(0, display.height()/2, display.width(), WHITE);
-    display.drawFastVLine(display.width()/2, 0, display.height(), WHITE);
+    const auto half_height = static_cast<const int16_t>(display.height() / 2);
+    const auto half_width = static_cast<const int16_t>(display.width() / 2);
 
-    display.setCursor(5, 10);
+    const int16_t left_column = 8;
+    const auto right_column = static_cast<const int16_t>(left_column + half_width );
+    const int16_t top_row = 10;
+    const auto bottom_row = static_cast<const int16_t>(top_row + half_height);
+
+    display.drawFastHLine(0, half_height, display.width(), WHITE);
+    display.drawFastVLine(half_width, 0, display.height(), WHITE);
+
+    display.setCursor(left_column, top_row);
     display.printf("%.2f C", data.temperature);
 
-    display.setCursor(display.width() / 2 + 5, 10);
+    display.setCursor(right_column, top_row);
     display.printf("%.2f%% RH", data.humidity);
 
-    display.setCursor(5, display.height()/2 + 10);
+    display.setCursor(left_column, bottom_row);
     display.printf("% .2f V", data.battery_voltage);
 
-    display.setCursor(display.width()/2 + 5, display.height()/2 + 10);
+    display.setCursor(right_column, bottom_row);
     display.printf("% .2f A", data.battery_current);
 
     display.display();
