@@ -15,14 +15,24 @@
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
-uint8_t BEEP = 2;  // GPIO used for beeper
-uint8_t ALERT_LED = 0;  // GPIO used for red LED
-uint8_t ACTIVITY_LED = 4;  // GPIO used for blue LED
+const uint8_t BEEP = 2;  // GPIO used for beeper
+const uint8_t ALERT_LED = 0;  // GPIO used for red LED
+const uint8_t ACTIVITY_LED = 4;  // GPIO used for blue LED
+
+const uint8_t BATTERY_CURRENT_1 = 34; // GPIO used for current sensor input 1
+const uint8_t BATTERY_CURRENT_2 = 35; // GPIO used for current sensor input 2
+const uint8_t BATTERY_VOLTAGE = 36;  // GPIO used for battery voltage input
+const int HALL_1_ZERO_OFFSET = 2820;
+const int HALL_2_ZERO_OFFSET = 2780;
 
 struct sensor_data {
     float humidity;
     float pressure;
     float temperature;
+    double battery_voltage;
+    double battery_current;
+    double battery_power;
+    double battery_remaining;
 };
 
 const char* ssid = "artran";
@@ -37,26 +47,34 @@ BME280I2C bme;    // Default : forced mode, standby time = 1000 ms /* NOLINT */
                   // Oversampling = pressure ×1, temperature ×1, humidity ×1, filter off,
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET); /* NOLINT */
 WiFiClient espClient; /* NOLINT */
-PubSubClient client(espClient); /* NOLINT */
+PubSubClient mqtt_client(espClient); /* NOLINT */
+
+void initialise_gpio();
 
 void initialise_display();
 
 void initialise_wifi();
 
-void initialise_bme280();
-
 void initialise_mqtt();
 
-void print_sensor_data(sensor_data data);
+void initialise_bme280();
 
 sensor_data fetch_bme280_data();
 
+double measure_battery_current();
+
+double measure_battery_voltage();
+
+double calculate_battery_power();
+
+double calculate_capacity();
+
+void print_sensor_data(sensor_data data);
+
 void publish_sensor_data(sensor_data data);
 
-void initialise_gpio();
+void update_alarms(sensor_data data);
 
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 void setup() {
     Serial.begin(SERIAL_BAUD);
     while(!Serial) {} // Wait
@@ -67,11 +85,11 @@ void setup() {
 
     initialise_display();
 
-    initialise_bme280();
-
     initialise_wifi();
 
     initialise_mqtt();
+
+    initialise_bme280();
 
     digitalWrite(ALERT_LED, LOW);
 }
@@ -81,15 +99,15 @@ void initialise_gpio() {
     pinMode(ALERT_LED, OUTPUT);
     pinMode(ACTIVITY_LED, OUTPUT);
 
+    pinMode(BATTERY_CURRENT_1, ANALOG);
+    pinMode(BATTERY_CURRENT_2, ANALOG);
+    pinMode(BATTERY_VOLTAGE, ANALOG);
+
     digitalWrite(BEEP, LOW);
     digitalWrite(ALERT_LED, LOW);
     digitalWrite(ACTIVITY_LED, LOW);
 }
 
-#pragma clang diagnostic pop
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wmissing-noreturn"
 void initialise_display() {
     if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
         Serial.println(F("SSD1306 allocation failed"));
@@ -98,7 +116,6 @@ void initialise_display() {
 
     display.display();
 }
-#pragma clang diagnostic pop
 
 void initialise_wifi() {
     digitalWrite(ACTIVITY_LED, HIGH);
@@ -119,6 +136,10 @@ void initialise_wifi() {
     digitalWrite(ACTIVITY_LED, LOW);
 }
 
+void initialise_mqtt() {
+    mqtt_client.setServer(mqttServer, mqttPort);
+}
+
 void initialise_bme280() {
     while(!bme.begin()) {
         Serial.println("Could not find BME280 sensor!");
@@ -137,57 +158,77 @@ void initialise_bme280() {
     }
 }
 
-void initialise_mqtt() {
-    client.setServer(mqttServer, mqttPort);
-}
-
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 void loop() {
     digitalWrite(ACTIVITY_LED, HIGH);
-    sensor_data bme_data = fetch_bme280_data();
-    print_sensor_data(bme_data);
-    publish_sensor_data(bme_data);
-    delay(500);
+    sensor_data data = fetch_bme280_data();
+    data.battery_current = measure_battery_current();
+
+    print_sensor_data(data);
+    publish_sensor_data(data);
+
+    delay(250);
     digitalWrite(ACTIVITY_LED, LOW);
 
     delay(59 * 1000);
 }
-#pragma clang diagnostic pop
 
-
+/**
+ * Get the environmental data from the BME280 and return it in a sensor_data
+ *
+ * @return a sensor_data object with the environmental values filled in
+ */
 sensor_data fetch_bme280_data() {
     sensor_data data = sensor_data();
     bme.read(data.pressure, data.temperature, data.humidity);
     return data;
 }
 
+/**
+ * Read the two hall effect sensors and calculate the total current being drawn
+ *
+ * Note: both sensors output 2.14V for zero current.
+ *
+ * The sensors are wired so that the signal *decrease* for *increasing* current.
+ *
+ * Full scale is 30A for each sensor, sensitivity is 66mV/A.
+ *
+ * @return the total current being drawn from the battery
+ */
+double measure_battery_current() {
+    int hall_1, hall_2;
+    double current1, current2;
+
+    // ADC = 0.7mV/lsb
+    // sensor = 66mV/A
+    // current = count * 0.7 / 66
+
+    hall_1 = analogRead(BATTERY_CURRENT_1);
+    hall_2 = analogRead(BATTERY_CURRENT_2);
+    current1 = (hall_1 - HALL_1_ZERO_OFFSET) * -0.7/66;
+    current2 = (hall_2 - HALL_2_ZERO_OFFSET) * -0.7/66;
+
+    return current1 + current2;
+}
+
 void print_sensor_data(sensor_data data) {
-    Serial.print("Temp: ");
-    Serial.print(data.temperature);
-    Serial.print("°C");
-    Serial.print("\t\tHumidity: ");
-    Serial.print(data.humidity);
-    Serial.print("% RH");
-    Serial.print("\t\tPressure: ");
-    Serial.print(data.pressure);
-    Serial.println(" Pa");
+    Serial.printf("Temp: %.2f°C\t\tHumidity: %.2f%% RH\t\tPressure: %.2f Pa\n", data.temperature, data.humidity, data.pressure);
+    Serial.printf("Current: %.2f A\n", data.battery_current);
 }
 
 void publish_sensor_data(sensor_data data) {
     std::ostringstream oss;
-    if (!client.connected()) {
-        if (!client.connect("PainCaveMonitorClient", mqttUser, mqttPassword)) {
+    if (!mqtt_client.connected()) {
+        if (!mqtt_client.connect("PainCaveMonitorClient", mqttUser, mqttPassword)) {
             Serial.print("Connection to MQTT broker failed with state: ");
-            Serial.println(client.state());
+            Serial.println(mqtt_client.state());
             delay(2000);
         }
     }
 
-    if (client.connected()) {
+    if (mqtt_client.connected()) {
         oss << "{\"temperature\": " << data.temperature << ", \"humidity\": " << data.humidity << ", \"pressure\": " << data.pressure << "}";
-        client.publish("paincavemonitor", oss.str().c_str());
-        client.disconnect();
+        mqtt_client.publish("paincavemonitor", oss.str().c_str());
+        mqtt_client.disconnect();
     }
 }
 
