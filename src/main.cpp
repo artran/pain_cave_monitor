@@ -71,6 +71,8 @@ void update_alarms(sensor_data data);
 
 void print_sensor_data(sensor_data data);
 
+void display_sensor_data(sensor_data data);
+
 void publish_sensor_data(sensor_data data);
 
 void setup() {
@@ -164,6 +166,7 @@ void loop() {
     data.battery_power = data.battery_voltage * data.battery_current;
 
     print_sensor_data(data);
+    display_sensor_data(data);
     publish_sensor_data(data);
 
     delay(250);
@@ -225,6 +228,29 @@ void print_sensor_data(sensor_data data) {
     Serial.printf("Voltage: % .2f V\tCurrent: % .2f A\t\tPower: % .2f W\n", data.battery_voltage, data.battery_current, data.battery_power);
 }
 
+void display_sensor_data(sensor_data data) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+
+    display.drawFastHLine(0, display.height()/2, display.width(), WHITE);
+    display.drawFastVLine(display.width()/2, 0, display.height(), WHITE);
+
+    display.setCursor(5, 10);
+    display.printf("%.2f C", data.temperature);
+
+    display.setCursor(display.width() / 2 + 5, 10);
+    display.printf("%.2f%% RH", data.humidity);
+
+    display.setCursor(5, display.height()/2 + 10);
+    display.printf("% .2f V", data.battery_voltage);
+
+    display.setCursor(display.width()/2 + 5, display.height()/2 + 10);
+    display.printf("% .2f A", data.battery_current);
+
+    display.display();
+}
+
 void publish_sensor_data(sensor_data data) {
     std::ostringstream oss;
     if (!mqtt_client.connected()) {
@@ -236,7 +262,8 @@ void publish_sensor_data(sensor_data data) {
     }
 
     if (mqtt_client.connected()) {
-        oss << "{\"temperature\": " << data.temperature << ", \"humidity\": " << data.humidity << ", \"pressure\": " << data.pressure << "}";
+        oss << "{\"temperature\": " << data.temperature << ", \"humidity\": " << data.humidity << ", \"pressure\": " << data.pressure;
+        oss << ", \"voltage\": " << data.battery_voltage << ", \"current\": " << data.battery_current << ", \"power\": " << data.battery_power << "}";
         mqtt_client.publish("paincavemonitor", oss.str().c_str());
         mqtt_client.disconnect();
     }
