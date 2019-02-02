@@ -15,6 +15,7 @@
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
+const int SAMPLE_EVERY_SECS = 60;  // How many seconds betwen samples
 const uint8_t BEEP = 2;  // GPIO used for beeper
 const uint8_t ALERT_LED = 0;  // GPIO used for red LED
 const uint8_t ACTIVITY_LED = 4;  // GPIO used for blue LED
@@ -49,6 +50,11 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET); /* NOL
 WiFiClient espClient; /* NOLINT */
 PubSubClient mqtt_client(espClient); /* NOLINT */
 
+volatile boolean interrupt_flag = false;
+hw_timer_t * timer = nullptr;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
+// Initialisation
 void initialise_gpio();
 
 void initialise_display();
@@ -58,6 +64,11 @@ void initialise_wifi();
 void initialise_mqtt();
 
 void initialise_bme280();
+
+void initialise_timer_interrupt();
+
+// Normal operation
+void handle_timer_interrupt();
 
 sensor_data fetch_bme280_data();
 
@@ -90,6 +101,9 @@ void setup() {
     initialise_mqtt();
 
     initialise_bme280();
+
+    initialise_timer_interrupt();
+    interrupt_flag = true;  // Do one scan immediately
 
     digitalWrite(ALERT_LED, LOW);
 }
@@ -158,22 +172,42 @@ void initialise_bme280() {
     }
 }
 
+void initialise_timer_interrupt() {
+    timer = timerBegin(0, 80, true);
+    timerAttachInterrupt(timer, &handle_timer_interrupt, true);
+    timerAlarmWrite(timer, SAMPLE_EVERY_SECS * 1000000, true);
+    timerAlarmEnable(timer);
+}
+
+void IRAM_ATTR handle_timer_interrupt() {
+    portENTER_CRITICAL_ISR(&timerMux);
+    interrupt_flag = true;
+    portEXIT_CRITICAL_ISR(&timerMux);
+}
+
 void loop() {
-    digitalWrite(ACTIVITY_LED, HIGH);
-    sensor_data data = fetch_bme280_data();
-    data.battery_current = measure_battery_current();
-    data.battery_voltage = measure_battery_voltage();
-    data.battery_power = data.battery_voltage * data.battery_current;
-    data.battery_remaining = calculate_remaining_capacity();
+    if (interrupt_flag) {
+        portENTER_CRITICAL(&timerMux);
+        interrupt_flag = false;
+        portEXIT_CRITICAL(&timerMux);
 
-    print_sensor_data(data);
-    display_sensor_data(data);
-    publish_sensor_data(data);
+        digitalWrite(ACTIVITY_LED, HIGH);
+        sensor_data data = fetch_bme280_data();
+        data.battery_current = measure_battery_current();
+        data.battery_voltage = measure_battery_voltage();
+        data.battery_power = data.battery_voltage * data.battery_current;
+        data.battery_remaining = calculate_remaining_capacity();
 
-    delay(250);
-    digitalWrite(ACTIVITY_LED, LOW);
+        print_sensor_data(data);
+        display_sensor_data(data);
+        publish_sensor_data(data);
 
-    delay(59 * 1000);
+        delay(250);
+        digitalWrite(ACTIVITY_LED, LOW);
+
+        delay((SAMPLE_EVERY_SECS - 2) * 1000);
+    }
+
 }
 
 /**
