@@ -22,8 +22,8 @@ const uint8_t ACTIVITY_LED = 4;  // GPIO used for blue LED
 const uint8_t BATTERY_CURRENT_1 = 34; // GPIO used for current sensor input 1
 const uint8_t BATTERY_CURRENT_2 = 35; // GPIO used for current sensor input 2
 const uint8_t BATTERY_VOLTAGE = 36;  // GPIO used for battery voltage input
-const int HALL_1_ZERO_OFFSET = 2820;
-const int HALL_2_ZERO_OFFSET = 2780;
+const int HALL_1_ZERO_OFFSET = 2901;
+const int HALL_2_ZERO_OFFSET = 2877;
 
 struct sensor_data {
     float humidity;
@@ -207,6 +207,7 @@ double measure_battery_current() {
 
     hall_1 = analogRead(BATTERY_CURRENT_1);
     hall_2 = analogRead(BATTERY_CURRENT_2);
+
     current1 = (hall_1 - HALL_1_ZERO_OFFSET) * -0.7/66;
     current2 = (hall_2 - HALL_2_ZERO_OFFSET) * -0.7/66;
 
@@ -237,7 +238,7 @@ void display_sensor_data(sensor_data data) {
     const auto half_height = static_cast<const int16_t>(display.height() / 2);
     const auto half_width = static_cast<const int16_t>(display.width() / 2);
 
-    const int16_t left_column = 8;
+    const int16_t left_column = 10;
     const auto right_column = static_cast<const int16_t>(left_column + half_width );
     const int16_t top_row = 10;
     const auto bottom_row = static_cast<const int16_t>(top_row + half_height);
@@ -246,10 +247,10 @@ void display_sensor_data(sensor_data data) {
     display.drawFastVLine(half_width, 0, display.height(), WHITE);
 
     display.setCursor(left_column, top_row);
-    display.printf("%.2f C", data.temperature);
+    display.printf("%.1f%cC", data.temperature, (char)247);
 
     display.setCursor(right_column, top_row);
-    display.printf("%.2f%% RH", data.humidity);
+    display.printf("%.1f%% RH", data.humidity);
 
     display.setCursor(left_column, bottom_row);
     display.printf("% .2f V", data.battery_voltage);
