@@ -65,15 +65,13 @@ double measure_battery_current();
 
 double measure_battery_voltage();
 
-double calculate_battery_power();
-
 double calculate_capacity();
+
+void update_alarms(sensor_data data);
 
 void print_sensor_data(sensor_data data);
 
 void publish_sensor_data(sensor_data data);
-
-void update_alarms(sensor_data data);
 
 void setup() {
     Serial.begin(SERIAL_BAUD);
@@ -162,6 +160,8 @@ void loop() {
     digitalWrite(ACTIVITY_LED, HIGH);
     sensor_data data = fetch_bme280_data();
     data.battery_current = measure_battery_current();
+    data.battery_voltage = measure_battery_voltage();
+    data.battery_power = data.battery_voltage * data.battery_current;
 
     print_sensor_data(data);
     publish_sensor_data(data);
@@ -210,9 +210,19 @@ double measure_battery_current() {
     return current1 + current2;
 }
 
+/**
+ * Read the voltage divider and calculate the battery voltage from it.
+ *
+ * @return the battery voltage
+ */
+double measure_battery_voltage() {
+    int battery_in = analogRead(BATTERY_VOLTAGE);
+    return 0.75e-3 * battery_in;
+}
+
 void print_sensor_data(sensor_data data) {
     Serial.printf("Temp: %.2f°C\t\tHumidity: %.2f%% RH\t\tPressure: %.2f Pa\n", data.temperature, data.humidity, data.pressure);
-    Serial.printf("Current: %.2f A\n", data.battery_current);
+    Serial.printf("Voltage: % .2f V\tCurrent: % .2f A\t\tPower: % .2f W\n", data.battery_voltage, data.battery_current, data.battery_power);
 }
 
 void publish_sensor_data(sensor_data data) {
