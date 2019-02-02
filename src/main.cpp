@@ -22,8 +22,8 @@ const uint8_t ACTIVITY_LED = 4;  // GPIO used for blue LED
 const uint8_t BATTERY_CURRENT_1 = 34; // GPIO used for current sensor input 1
 const uint8_t BATTERY_CURRENT_2 = 35; // GPIO used for current sensor input 2
 const uint8_t BATTERY_VOLTAGE = 36;  // GPIO used for battery voltage input
-const int HALL_1_ZERO_OFFSET = 2901;
-const int HALL_2_ZERO_OFFSET = 2877;
+const int HALL_1_ZERO_OFFSET = 2909;
+const int HALL_2_ZERO_OFFSET = 2881;
 
 struct sensor_data {
     float humidity;
