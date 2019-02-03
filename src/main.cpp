@@ -6,8 +6,7 @@
 #include <PubSubClient.h>
 #include <sstream>
 #include <WiFi.h>
-#include <WiFiUdp.h>
-#include <Wire.h>
+#include <esp_adc_cal.h>
 
 #define SERIAL_BAUD 115200
 
@@ -23,10 +22,14 @@ const uint8_t ACTIVITY_LED = 4;  // GPIO used for blue LED
 const uint8_t BATTERY_CURRENT_1 = 34; // GPIO used for current sensor input 1
 const uint8_t BATTERY_CURRENT_2 = 35; // GPIO used for current sensor input 2
 const uint8_t BATTERY_VOLTAGE = 36;  // GPIO used for battery voltage input
-const int HALL_1_ZERO_OFFSET = 2909;
-const int HALL_2_ZERO_OFFSET = 2881;
+const int HALL_1_ZERO_OFFSET = 2707;
+const int HALL_2_ZERO_OFFSET = 2784;
 
-struct sensor_data {
+long h1_total = 0;
+long h2_total = 0;
+int sample_count = 0;
+
+typedef struct {
     float humidity;
     float pressure;
     float temperature;
@@ -34,7 +37,7 @@ struct sensor_data {
     double battery_current;
     double battery_power;
     double battery_remaining;
-};
+} sensor_data;
 
 const char* ssid = "artran";
 const char* wifiPassword = "Life is like a candle";
@@ -53,6 +56,7 @@ PubSubClient mqtt_client(espClient); /* NOLINT */
 volatile boolean interrupt_flag = false;
 hw_timer_t * timer = nullptr;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+esp_adc_cal_characteristics_t adc_cal_value;
 
 // Initialisation
 void initialise_gpio();
@@ -80,11 +84,11 @@ double calculate_remaining_capacity();
 
 void update_alarms(sensor_data data);
 
-void print_sensor_data(sensor_data data);
+void print_sensor_data(sensor_data *data);
 
-void display_sensor_data(sensor_data data);
+void display_sensor_data(sensor_data *data);
 
-void publish_sensor_data(sensor_data data);
+void publish_sensor_data(sensor_data *data);
 
 void setup() {
     Serial.begin(SERIAL_BAUD);
@@ -120,6 +124,13 @@ void initialise_gpio() {
     digitalWrite(BEEP, LOW);
     digitalWrite(ALERT_LED, LOW);
     digitalWrite(ACTIVITY_LED, LOW);
+
+    esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_cal_value);
+    Serial.println("\n########## ADC Calibration ##########");
+    Serial.printf("Unit: %d\tAtten: %d\tWidth: %d\tCoeffA: %u\tCoeffB %u\tVref: %u\n",
+            adc_cal_value.adc_num, adc_cal_value.atten, adc_cal_value.bit_width, adc_cal_value.coeff_a,
+            adc_cal_value.coeff_b, adc_cal_value.vref);
+    Serial.println("#####################################");
 }
 
 void initialise_display() {
@@ -198,9 +209,9 @@ void loop() {
         data.battery_power = data.battery_voltage * data.battery_current;
         data.battery_remaining = calculate_remaining_capacity();
 
-        print_sensor_data(data);
-        display_sensor_data(data);
-        publish_sensor_data(data);
+        print_sensor_data(&data);
+        display_sensor_data(&data);
+        publish_sensor_data(&data);
 
         delay(250);
         digitalWrite(ACTIVITY_LED, LOW);
@@ -243,6 +254,11 @@ double measure_battery_current() {
     hall_1 = analogRead(BATTERY_CURRENT_1);
     hall_2 = analogRead(BATTERY_CURRENT_2);
 
+    h1_total += hall_1;
+    h2_total += hall_2;
+    sample_count++;
+    Serial.printf("H1: %ld\t\tH2: %ld\t\tSamples: %d\n", h1_total/sample_count, h2_total/sample_count, sample_count);
+
     current1 = (hall_1 - HALL_1_ZERO_OFFSET) * -0.7/66;
     current2 = (hall_2 - HALL_2_ZERO_OFFSET) * -0.7/66;
 
@@ -269,12 +285,14 @@ double calculate_remaining_capacity() {
     return 0; // TODO
 }
 
-void print_sensor_data(sensor_data data) {
-    Serial.printf("Temp: %.2f°C\t\tHumidity: %.2f%% RH\t\tPressure: %.2f Pa\n", data.temperature, data.humidity, data.pressure);
-    Serial.printf("Voltage: % .2f V\tCurrent: % .2f A\t\tPower: % .2f W\t\t Remaining: %.0f mins\n", data.battery_voltage, data.battery_current, data.battery_power, data.battery_remaining);
+void print_sensor_data(sensor_data *data) {
+    Serial.printf("Temp: %.2f°C\t\tHumidity: %.2f%% RH\t\tPressure: %.2f Pa\n",
+            data->temperature, data->humidity, data->pressure);
+    Serial.printf("Voltage: % .2f V\tCurrent: % .2f A\t\tPower: % .2f W\t\t Remaining: %.0f mins\n\n",
+            data->battery_voltage, data->battery_current, data->battery_power, data->battery_remaining);
 }
 
-void display_sensor_data(sensor_data data) {
+void display_sensor_data(sensor_data *data) {
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(WHITE);
@@ -291,21 +309,21 @@ void display_sensor_data(sensor_data data) {
     display.drawFastVLine(half_width, 0, display.height(), WHITE);
 
     display.setCursor(left_column, top_row);
-    display.printf("%.1f%cC", data.temperature, (char)247);
+    display.printf("%.1f%cC", data->temperature, (char)247);
 
     display.setCursor(right_column, top_row);
-    display.printf("%.1f%% RH", data.humidity);
+    display.printf("%.1f%% RH", data->humidity);
 
     display.setCursor(left_column, bottom_row);
-    display.printf("% .2f V", data.battery_voltage);
+    display.printf("% .2f V", data->battery_voltage);
 
     display.setCursor(right_column, bottom_row);
-    display.printf("% .2f A", data.battery_current);
+    display.printf("% .2f A", data->battery_current);
 
     display.display();
 }
 
-void publish_sensor_data(sensor_data data) {
+void publish_sensor_data(sensor_data *data) {
     std::ostringstream oss;
     if (!mqtt_client.connected()) {
         if (!mqtt_client.connect("PainCaveMonitorClient", mqttUser, mqttPassword)) {
@@ -316,9 +334,14 @@ void publish_sensor_data(sensor_data data) {
     }
 
     if (mqtt_client.connected()) {
-        oss << "{\"temperature\": " << data.temperature << ", \"humidity\": " << data.humidity << ", \"pressure\": " << data.pressure;
-        oss << ", \"voltage\": " << data.battery_voltage << ", \"current\": " << data.battery_current << ", \"power\": " << data.battery_power << ", \"remaining\": " << data.battery_remaining << "}";
-        mqtt_client.publish("paincavemonitor", oss.str().c_str());
+        oss << "{\"temperature\": " << data->temperature << ", \"humidity\": " << data->humidity << ", \"pressure\": "
+            << data->pressure << ", \"voltage\": " << data->battery_voltage << ", \"current\": "
+            << data->battery_current << ", \"power\": " << data->battery_power << ", \"remaining\": "
+            << data->battery_remaining << "}";
+        const char *payload = oss.str().c_str();
+//        Serial.print("MQTT payload: ");
+//        Serial.println(payload);
+        mqtt_client.publish("paincavemonitor", payload);
         mqtt_client.disconnect();
     }
 }
