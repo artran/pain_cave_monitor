@@ -22,11 +22,11 @@ const uint8_t ACTIVITY_LED = 4;  // GPIO used for blue LED
 const uint8_t BATTERY_CURRENT_1 = 34; // GPIO used for current sensor input 1
 const uint8_t BATTERY_CURRENT_2 = 35; // GPIO used for current sensor input 2
 const uint8_t BATTERY_VOLTAGE = 36;  // GPIO used for battery voltage input
-const int HALL_1_ZERO_OFFSET = 2707;
-const int HALL_2_ZERO_OFFSET = 2784;
+const uint16_t HALL_1_ZERO_OFFSET = 2330;
+const uint16_t HALL_2_ZERO_OFFSET = 2320;
 
-long h1_total = 0;
-long h2_total = 0;
+uint32_t v1_total = 0;
+uint32_t v2_total = 0;
 int sample_count = 0;
 
 typedef struct {
@@ -244,36 +244,36 @@ sensor_data fetch_bme280_data() {
  * @return the total current being drawn from the battery
  */
 double measure_battery_current() {
-    int hall_1, hall_2;
-    double current1, current2;
+    uint16_t hall_1 = analogRead(BATTERY_CURRENT_1);
+    uint16_t hall_2 = analogRead(BATTERY_CURRENT_2);
+    int voltage_1 = esp_adc_cal_raw_to_voltage(hall_1, &adc_cal_value) - HALL_1_ZERO_OFFSET;
+    int voltage_2 = esp_adc_cal_raw_to_voltage(hall_2, &adc_cal_value) - HALL_2_ZERO_OFFSET;
 
-    // ADC = 0.7mV/lsb
-    // sensor = 66mV/A
-    // current = count * 0.7 / 66
-
-    hall_1 = analogRead(BATTERY_CURRENT_1);
-    hall_2 = analogRead(BATTERY_CURRENT_2);
-
-    h1_total += hall_1;
-    h2_total += hall_2;
+    // TODO: remove after testing
+    v1_total += esp_adc_cal_raw_to_voltage(hall_1, &adc_cal_value);
+    v2_total += esp_adc_cal_raw_to_voltage(hall_2, &adc_cal_value);
     sample_count++;
-    Serial.printf("H1: %ld\t\tH2: %ld\t\tSamples: %d\n", h1_total/sample_count, h2_total/sample_count, sample_count);
+    Serial.printf("V1: %u mV\t\tV2: %u mV\n", voltage_1, voltage_2);
+    Serial.printf("Av V1: %u\t\tAv V2: %u\t\tSamples: %d\n", v1_total/sample_count, v2_total/sample_count, sample_count);
+    // END TODO
 
-    current1 = (hall_1 - HALL_1_ZERO_OFFSET) * -0.7/66;
-    current2 = (hall_2 - HALL_2_ZERO_OFFSET) * -0.7/66;
+    double current1 = voltage_1 / 66.0;
+    double current2 = voltage_2 / 66.0;
 
     return current1 + current2;
 }
 
 /**
  * Read the voltage divider and calculate the battery voltage from it.
+ * Voltage divider is 3k3 to ground, 10k to battery
  *
  * @return the battery voltage
  */
 double measure_battery_voltage() {
-    // Voltage divider is 3k3 to ground, 10k to battery
-    int battery_in = analogRead(BATTERY_VOLTAGE);
-    return (0.75e-3 * battery_in) * 13300 / 3300;
+    uint32_t raw_batt_in = analogRead(BATTERY_VOLTAGE);
+    uint32_t battery_in = esp_adc_cal_raw_to_voltage(raw_batt_in, &adc_cal_value);
+
+    return (battery_in/1000.0) * 13300 / 3300;
 }
 
 /**
