@@ -14,16 +14,18 @@
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
+#define SAMPLES_PER_READING 64  // How many ADC samples to take per reading
+
 const int SAMPLE_EVERY_SECS = 60;  // How many seconds betwen samples
 const uint8_t BEEP = 2;  // GPIO used for beeper
 const uint8_t ALERT_LED = 0;  // GPIO used for red LED
 const uint8_t ACTIVITY_LED = 4;  // GPIO used for blue LED
 
-const uint8_t BATTERY_CURRENT_1 = 34; // GPIO used for current sensor input 1
-const uint8_t BATTERY_CURRENT_2 = 35; // GPIO used for current sensor input 2
-const uint8_t BATTERY_VOLTAGE = 36;  // GPIO used for battery voltage input
-const uint16_t HALL_1_ZERO_OFFSET = 2330;
-const uint16_t HALL_2_ZERO_OFFSET = 2320;
+const uint8_t BATTERY_CURRENT_1 = 36; // GPIO used for current sensor input 1
+const uint8_t BATTERY_CURRENT_2 = 39; // GPIO used for current sensor input 2
+const uint8_t BATTERY_VOLTAGE = 34;  // GPIO used for battery voltage input
+const uint16_t HALL_1_ZERO_OFFSET = 2248;
+const uint16_t HALL_2_ZERO_OFFSET = 2287;
 
 uint32_t v1_total = 0;
 uint32_t v2_total = 0;
@@ -93,6 +95,7 @@ void publish_sensor_data(sensor_data *data);
 void setup() {
     Serial.begin(SERIAL_BAUD);
     while(!Serial) {} // Wait
+    Serial.println("########## Initialisation ##########");
 
     initialise_gpio();
 
@@ -109,6 +112,7 @@ void setup() {
     initialise_timer_interrupt();
     interrupt_flag = true;  // Do one scan immediately
 
+    Serial.println("####################################\n");
     digitalWrite(ALERT_LED, LOW);
 }
 
@@ -127,10 +131,8 @@ void initialise_gpio() {
 
     esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_cal_value);
     Serial.println("\n########## ADC Calibration ##########");
-    Serial.printf("Unit: %d\tAtten: %d\tWidth: %d\tCoeffA: %u\tCoeffB %u\tVref: %u\n",
-            adc_cal_value.adc_num, adc_cal_value.atten, adc_cal_value.bit_width, adc_cal_value.coeff_a,
-            adc_cal_value.coeff_b, adc_cal_value.vref);
-    Serial.println("#####################################");
+    Serial.printf("CoeffA: %u\tCoeffB %u\n", adc_cal_value.coeff_a, adc_cal_value.coeff_b);
+    Serial.println("#####################################\n");
 }
 
 void initialise_display() {
@@ -244,8 +246,17 @@ sensor_data fetch_bme280_data() {
  * @return the total current being drawn from the battery
  */
 double measure_battery_current() {
-    uint16_t hall_1 = analogRead(BATTERY_CURRENT_1);
-    uint16_t hall_2 = analogRead(BATTERY_CURRENT_2);
+    uint32_t hall_1 = 0;
+    uint32_t hall_2 = 0;
+
+    for (int i = 0; i < SAMPLES_PER_READING; i++) {
+        hall_1 += analogRead(BATTERY_CURRENT_1);
+        hall_2 += analogRead(BATTERY_CURRENT_2);
+    }
+
+    hall_1 /= SAMPLES_PER_READING;
+    hall_2 /= SAMPLES_PER_READING;
+
     int voltage_1 = esp_adc_cal_raw_to_voltage(hall_1, &adc_cal_value) - HALL_1_ZERO_OFFSET;
     int voltage_2 = esp_adc_cal_raw_to_voltage(hall_2, &adc_cal_value) - HALL_2_ZERO_OFFSET;
 
@@ -253,7 +264,7 @@ double measure_battery_current() {
     v1_total += esp_adc_cal_raw_to_voltage(hall_1, &adc_cal_value);
     v2_total += esp_adc_cal_raw_to_voltage(hall_2, &adc_cal_value);
     sample_count++;
-    Serial.printf("V1: %u mV\t\tV2: %u mV\n", voltage_1, voltage_2);
+    Serial.printf("V1: %d mV\t\tV2: %d mV\n", voltage_1, voltage_2);
     Serial.printf("Av V1: %u\t\tAv V2: %u\t\tSamples: %d\n", v1_total/sample_count, v2_total/sample_count, sample_count);
     // END TODO
 
@@ -270,7 +281,13 @@ double measure_battery_current() {
  * @return the battery voltage
  */
 double measure_battery_voltage() {
-    uint32_t raw_batt_in = analogRead(BATTERY_VOLTAGE);
+    uint32_t raw_batt_in = 0;
+
+    for (int i = 0; i < SAMPLES_PER_READING; i++) {
+        raw_batt_in += analogRead(BATTERY_VOLTAGE);
+    }
+
+    raw_batt_in /= SAMPLES_PER_READING;
     uint32_t battery_in = esp_adc_cal_raw_to_voltage(raw_batt_in, &adc_cal_value);
 
     return (battery_in/1000.0) * 13300 / 3300;
@@ -288,7 +305,7 @@ double calculate_remaining_capacity() {
 void print_sensor_data(sensor_data *data) {
     Serial.printf("Temp: %.2f°C\t\tHumidity: %.2f%% RH\t\tPressure: %.2f Pa\n",
             data->temperature, data->humidity, data->pressure);
-    Serial.printf("Voltage: % .2f V\tCurrent: % .2f A\t\tPower: % .2f W\t\t Remaining: %.0f mins\n\n",
+    Serial.printf("Voltage: % .1f V\tCurrent: % .1f A\t\tPower: % .1f W\t\t Remaining: %.0f mins\n\n",
             data->battery_voltage, data->battery_current, data->battery_power, data->battery_remaining);
 }
 
@@ -315,10 +332,10 @@ void display_sensor_data(sensor_data *data) {
     display.printf("%.1f%% RH", data->humidity);
 
     display.setCursor(left_column, bottom_row);
-    display.printf("% .2f V", data->battery_voltage);
+    display.printf("% .1f V", data->battery_voltage);
 
     display.setCursor(right_column, bottom_row);
-    display.printf("% .2f A", data->battery_current);
+    display.printf("% .1f A", data->battery_current);
 
     display.display();
 }
